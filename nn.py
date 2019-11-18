@@ -21,6 +21,11 @@ def sigmoid_derivative(z):
     return s * (1 - s)
 
 class NN:
+    class Activation:
+        def __init__(self, a, z):
+            self.a = a
+            self.z = z
+
     class Layer:
         def __init__(self, w, b):
             self.w = w
@@ -29,13 +34,13 @@ class NN:
         @staticmethod
         def new(layersize, inputsize):
             return NN.Layer(
-                np.random.randn(layersize, inputsize), # weight matrix
-                np.zeros(layersize)                    # bias vector
+                np.random.randn(layersize, inputsize) / np.sqrt(inputsize), # weight matrix
+                np.random.randn(layersize)                                  # bias vector
             )
 
         def activate(self, x):
             z = np.dot(self.w, x) + self.b
-            return sigmoid(z), z
+            return NN.Activation(sigmoid(z), z)
 
     @staticmethod
     def load(filepath):
@@ -50,40 +55,50 @@ class NN:
         else:
             self.layers = []
 
-    def feedforward(self, inputs):
-        acts = inputs
+    def feedforward(self, x):
+        a = x
         for layer in self.layers:
-            acts, _ = layer.activate(acts)
-        return acts
+            a = layer.activate(a).a
+        return a
 
     def backprop(self, x, y):
-        a1 = x
-        a2, z2 = self.layers[0].activate(a1)
-        a3, z3 = self.layers[1].activate(a2)
+        activations = [NN.Activation(x, None)]
+        for layer in self.layers:
+            activations.append(layer.activate(activations[-1].a))
+
+        deltas = [None] * len(self.layers)
 
         # output layer
-        o_error = self.cost_derivative(a3, y) * sigmoid_derivative(z3)
-        o_error_w = np.outer(o_error, a2)
+        output_delta = self.cost_derivative(activations[-1].a, y, activations[-1].z)
+        output_delta_w = np.outer(output_delta, activations[-2].a)
+        deltas[-1] = (output_delta, output_delta_w)
+        
+        # hidden layers
+        for i in range(-2, -(len(self.layers) + 1), -1):
+            delta_b = np.dot(self.layers[i + 1].w.T, deltas[i + 1][0]) * sigmoid_derivative(activations[i].z)
+            delta_w = np.outer(delta_b, activations[i - 1].a)
+            deltas[i] = (delta_b, delta_w)
 
-        # hidden layer
-        h_error = np.dot(self.layers[1].w.T, o_error) * sigmoid_derivative(z2)
-        h_weight_error = np.outer(h_error, a1)
+        return deltas
 
-        return [
-            (h_error, h_weight_error),
-            (o_error, o_error_w),
-        ]
-
-    def cost_derivative(self, a, y):
+    def cost_derivative(self, a, y, z):
+        #quadratic cost derivative
+        #return (a - y) * sigmoid_derivative(z)
+        #cross entropy derivative
         return a - y
 
-    def train(self, training_data, test_data, epochs, batch_size, learning_rate):
-        mses = []
+    def train(self, training_data, test_data, epochs, batch_size, learning_rate, regularisation):
+        costs = []
+        accuracies = []
+
+        l = 0.1
+        k = learning_rate / batch_size
+        r = 1 - (learning_rate * regularisation / len(training_data))
+        
         for i in range(epochs):
             print("epoch", i)
             np.random.shuffle(training_data)
 
-            k = learning_rate / batch_size
             for t_batch in partition_list(training_data, batch_size):
                 delta_b = [np.zeros(l.b.shape) for l in self.layers]
                 delta_w = [np.zeros(l.w.shape) for l in self.layers]
@@ -95,29 +110,31 @@ class NN:
                         delta_w[i] += d_w
                 
                 for (d_b, d_w, layer) in zip(delta_b, delta_w, self.layers):
-                    layer.w = layer.w - (k * d_w)
+                    layer.w = (r * layer.w) - (k * d_w)
                     layer.b = layer.b - (k * d_b)
 
-            m = self.test(test_data)
-            mses.append(m)
+            cost, accuracy = self.test(test_data)
+            costs.append(cost)
+            accuracies.append(accuracy)
 
-        self.save_graph(mses)
+        self.save_graph(costs, accuracies)
 
     def test(self, testdata):
-        mse = 0
+        cost = 0
         matches = 0
+        n = len(testdata)
 
         for (x, y) in testdata:
-            r = self.feedforward(x)
-            cost = r - y
-            mse = mse + np.dot(cost, cost)
-            if np.argmax(r) == np.argmax(y):
-                matches = matches + 1
+            ay = self.feedforward(x)
+            if np.argmax(ay) == np.argmax(y):
+                matches += 1
+            # quadratic cost
+            cost += (0.5 * np.linalg.norm(ay - y)**2)
 
-        mse = mse / (2 * len(testdata))
-        print("MSE:", mse)
-        print("matches:", matches, "/", len(testdata))
-        return mse
+        cost = cost / n
+        print("cost:", cost)
+        print("accuracy:", matches, "/", n)
+        return cost, matches / n
 
     def debug_print(self):
         for i, l in enumerate(self.layers):
@@ -137,12 +154,19 @@ class NN:
         with open(name, 'w') as f:
             json.dump(self.layers, f, cls=NN.NumpyEncoder)
 
-    def save_graph(self, mses):
+    def save_graph(self, cost, accuracies):
         from matplotlib import pyplot as plt
-        plt.plot(mses)
+        plt.figure()
+        plt.plot(cost)
         plt.xlabel("epochs")
-        plt.ylabel("mean squared error")
+        plt.ylabel("cost")
         plt.savefig("mse.png")
+        
+        plt.figure()
+        plt.plot(accuracies)
+        plt.xlabel("epochs")
+        plt.ylabel("accuracy")
+        plt.savefig("accuracy.png")
 
 
 def encode_x(x):
@@ -156,7 +180,6 @@ def encode_y(y):
 def encode_data(x_inputs, y_outputs):
     return list(map(lambda p: (encode_x(p[0]), encode_y(p[1])), zip(x_inputs, y_outputs)))
 
-
 def main():
     from keras.datasets import mnist
     (x_train, y_train), (x_test, y_test) = mnist.load_data()
@@ -167,7 +190,7 @@ def main():
     print("begin training")
 
     n = time.time()
-    nn.train(encode_data(x_train, y_train), encode_data(x_test, y_test), 30, 10, 3)
+    nn.train(encode_data(x_train, y_train), encode_data(x_test, y_test), 30, 10, 0.1, 5)
     print(time.time() - n, "s")
 
     print("end training")
