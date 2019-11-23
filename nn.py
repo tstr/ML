@@ -91,7 +91,6 @@ class NN:
         costs = []
         accuracies = []
 
-        l = 0.1
         k = learning_rate / batch_size
         r = 1 - (learning_rate * regularisation / len(training_data))
         
@@ -184,8 +183,8 @@ def main():
     from keras.datasets import mnist
     (x_train, y_train), (x_test, y_test) = mnist.load_data()
 
-    nn = NN([784, 32, 10])
-
+    nn = NN([784, 200, 90, 10])
+    
     print("---------------------------------------------")
     print("begin training")
 
