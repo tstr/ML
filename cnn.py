@@ -3,6 +3,12 @@
 import numpy as np
 from nn import NN
 from matplotlib import pyplot as plt
+import logging as log
+import sys
+
+if __name__ == "__main__":
+    log.basicConfig(level=log.DEBUG, filename="cnn.log", filemode="a+",
+                        format="%(asctime)-15s %(levelname)-8s %(message)s")
 
 #######################################################################################
 
@@ -67,6 +73,7 @@ class ConvolutionLayer:
         return out
 
     def backprop(self, x, delta):
+        x = x.reshape(self.in_shape)
         dy = delta.reshape(self.out_shape)
         dx = np.zeros(self.in_shape)
         dw = np.zeros(self.w.shape)
@@ -74,11 +81,12 @@ class ConvolutionLayer:
         db = np.sum(dy, axis=(1,2)).reshape(self.b.shape)
         # for every feature map
         for f in range(self.features):
-            # gradient of weights
-            dw[f] = self.conv2D(x, dy[f], 1, 0)
-            w_p = np.rot90(self.w[f], 2, axes=(1,2)).reshape(self.w.shape[2], self.w.shape[3])
-            # accumulate gradient of input
-            dx += self.conv2D(dy[f], w_p, 1, self.kernel - 1)
+            for n in range(x.shape[0]):
+                # gradient of weights
+                dw[f,n] = self.conv2D(x[n], dy[f], 1, 0)
+                w_p = np.rot90(self.w[f,n], 2, axes=(0,1))#.reshape(self.w.shape[2], self.w.shape[3])
+                # accumulate gradient of input
+                dx[n] += self.conv2D(dy[f], w_p, 1, self.kernel - 1)
 
         return db, dw, dx
 
@@ -110,7 +118,7 @@ class MaxPool:
             for j in range(indices.shape[1]):
                 for i in range(indices.shape[2]):
                     x_j, x_i = np.unravel_index(indices[f, i, j], (sz,sz))
-                    dx[f, x_j, x_i] = dy[f,j,i]
+                    dx[f, j*sz+x_j, i*sz+x_i] = dy[f,j,i]
         return dx
 
 
@@ -128,7 +136,7 @@ def test():
     pool = MaxPool(inputs=conv.out_shape, size=2)
 
     features, _ = pool.feed(conv.convolve(x))
-    print("feature shape:", features.shape)
+    print("feature shape:" + features.shape)
 
     for f in features[:]:
         print(f.shape)
@@ -156,13 +164,39 @@ def test2():
     alpha = 0.1
     regul = 1 - (alpha * 5 / len(dataset))
 
+    def perf():
+        print("testing...")
+        sys.stdout.flush()
+
+        cost = 0
+        matches = 0
+        n = len(testset)        
+        for x, y in testset:
+            cx = conv.convolve(x)
+            cx, _ = maxp.feed(cx)
+            ay = nn.feedforward(cx.flatten())
+
+            if np.argmax(ay) == np.argmax(y):
+                matches += 1
+            
+            # quadratic cost
+            cost += (0.5 * np.linalg.norm(ay - y)**2)
+
+        cost = cost / n
+        print("tested:")
+        print("cost:", cost)
+        print("accuracy:", matches, "/", n)
+        sys.stdout.flush()
+
     for e in range(30):
         print("epoch", e)
+        sys.stdout.flush()
         np.random.shuffle(dataset)
 
         for i, (x, y) in enumerate(dataset):
             if i % 100 == 0:
                 print(i)
+                sys.stdout.flush()
 
             # convolution layer
             cx = conv.convolve(x)
@@ -182,23 +216,9 @@ def test2():
                 layer.b = layer.b - (alpha * d_b)
                 layer.w = (regul * layer.w) - (alpha * d_w)
 
-        cost = 0
-        matches = 0
-        n = len(testset)
-        for x, y in testset:
-            cx = conv.convolve(x)
-            ay = nn.feedforward(cx.flatten())
-
-            if np.argmax(ay) == np.argmax(y):
-                matches += 1
-            
-            # quadratic cost
-            cost += (0.5 * np.linalg.norm(ay - y)**2)
-
-        cost = cost / n
-        print("cost:", cost)
-        print("accuracy:", matches, "/", n)
+        perf()
         
 
 if __name__ == "__main__":
+    sys.stdout = open("cnn.log", "w")
     test2()

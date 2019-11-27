@@ -1,5 +1,12 @@
-__pycache__
-.vscode
-out
-log
-tests
+__pycache__/
+.vscode/
+out/
+log/
+tests/
+mnist_gen/
+crt/
+nn.json
+*.log
+*.png
+*.dll
+*.exe
